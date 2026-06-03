@@ -6,81 +6,97 @@ import (
 	"database/sql"
     "golang.org/x/crypto/bcrypt"
     "chat.fisayo.net/internal/assert"
+    "github.com/pressly/goose/v3"
 )
-func setupSchema(db *sql.DB) error {
-
-    schema := `
-    CREATE TABLE users (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        phone_number TEXT NOT NULL UNIQUE
-    );
-
-    CREATE TABLE conversations (
-        conversation_id INTEGER PRIMARY KEY,
-        type_of TEXT NOT NULL,
-        title TEXT NOT NULL,
-        parent_id INTEGER
-    );
-
-    CREATE TABLE messages (
-        message_id INTEGER PRIMARY KEY,
-        sender_id INTEGER NOT NULL,
-        conversation_id INTEGER NOT NULL,
-        content TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        parent_id INTEGER
-    );
-    `
-
-    _, err := db.Exec(schema)
-    return err
-}
-
 func newTestDB(t *testing.T) (*sql.DB, func()) {
+	t.Helper()
+	tmpFile, err := os.CreateTemp("", "chat_test_*.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", tmpFile.Name())
+	if err != nil {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	_, err = db.Exec("PRAGMA foreign_keys = ON")
+	if err != nil {
+		db.Close()
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		t.Fatal(err)
+	}
 
-    tmpFile, err := os.CreateTemp("", "*.db")
-    if err != nil {
-        t.Fatal(err)
-    }
+	err = goose.SetDialect("sqlite")
+	if err != nil {
+		db.Close()
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		t.Fatal(err)
+	}
 
-    db, err := sql.Open("sqlite", tmpFile.Name())
-    if err != nil {
-        t.Fatal(err)
-    }
+	err = goose.Up(db, "../database/migrations")
+	if err != nil {
+		db.Close()
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+		t.Fatal(err)
+	}
 
-    db.SetMaxOpenConns(1)
+	cleanup := func() {
+		db.Close()
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+	}
 
-    err = setupSchema(db)
-    if err != nil {
-        t.Fatal(err)
-    }
-
-    cleanup := func() {
-        db.Close()
-        os.Remove(tmpFile.Name())
-    }
-
-    return db, cleanup
+	return db, cleanup
 }
 func TestUserInsert(t *testing.T) {
+	tests := []struct {
+		name      string
+		username  string
+		phone     string
+		password  string
+		wantError bool
+	}{
+		{
+			name:      "valid user",
+			username:  "john",
+			phone:     "+2348012345678",
+			password:  "password123",
+			wantError: false,
+		},
+	}
 
-    db, cleanup := newTestDB(t)
-    defer cleanup()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, cleanup := newTestDB(t)
+			defer cleanup()
 
-    model := UserModel{DB: db}
+			m := UserModel{DB: db}
 
-    err := model.Insert(
-        "john",
-        "+2348012345678",
-        "hash123",
-    )
+			err := m.Insert(
+				tt.username,
+				tt.phone,
+				tt.password,
+			)
 
-    if err != nil {
-        t.Fatal(err)
-    }
+			if tt.wantError {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
+
 func TestUserAuthenticate(t *testing.T) {
 
     db, cleanup := newTestDB(t)
@@ -97,8 +113,6 @@ func TestUserAuthenticate(t *testing.T) {
     if err != nil {
         t.Fatal(err)
     }
-
-    // seed test user
     _, err = db.Exec(`
         INSERT INTO users (
             username,
@@ -129,7 +143,7 @@ func TestUserAuthenticate(t *testing.T) {
             username:   "fissy02",
             phone:      "+2348012345678",
             password:   "password123",
-            wantErr:    true,
+            wantErr:    false,
             wantUserID: 1,
         },
         {
@@ -137,7 +151,7 @@ func TestUserAuthenticate(t *testing.T) {
             username:   "fissy02",
             phone:      "+2348012345678",
             password:   "wrongpassword",
-            wantErr:    false,
+            wantErr:    true,
             wantUserID: 0,
         },
         {
@@ -145,7 +159,7 @@ func TestUserAuthenticate(t *testing.T) {
             username:   "ghost",
             phone:      "+2348012345679",
             password:   "password123",
-            wantErr:    false,
+            wantErr:    true,
             wantUserID: 0,
         },
     }
@@ -210,6 +224,15 @@ func TestUserModelExists(t *testing.T) {
             db, cleanup := newTestDB(t)
             defer cleanup()
             m := UserModel{DB: db}
+            err := m.Insert(
+				"john",
+				"+2348012345678",
+				"password123",
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+
             exists, err := m.Exists(tt.userID)
             assert.Equal(t, exists, tt.want)
             assert.NilError(t, err)
