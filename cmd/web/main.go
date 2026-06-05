@@ -3,32 +3,30 @@ package main
 import (
 	"database/sql"
 	"flag"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"html/template"
 	"time"
 	"chat.fisayo.net/internal/database"
+	"chat.fisayo.net/internal/models"
+	"github.com/go-playground/form/v4"
 	"github.com/alexedwards/scs/sqlite3store"
 	"github.com/alexedwards/scs/v2"
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 )
-var addr = flag.String("addr", ":8000", "http service address")
-
-func serveHome(w http.ResponseWriter, r *http.Request) {
-	log.Println(r.URL)
-	if r.URL.Path != "/" {
-		http.Error(w, "Not found", http.StatusNotFound)
-	 	return
-	 }
-	 if r.Method != http.MethodGet {
-	 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	 	return
-	 }
-	 http.ServeFile(w, r, "cmd/web/home.html")
+type application struct{
+	logger *slog.Logger
+	templateCache map[string]*template.Template
+	users models.UserModelInterface
+	sessionManager *scs.SessionManager
+	hub *Hub
+	formDecoder *form.Decoder
 }
+
 func main() {
+	addr := flag.String("addr", ":8000", "http service address")
 	flag.Parse()
 	logger:= slog.New(slog.NewTextHandler(os.Stdout, nil))
 	dsn := "chatapp.db"
@@ -40,18 +38,33 @@ func main() {
 	defer db.Close()
 	hub := newHub()
 	go hub.run()
-	http.HandleFunc("/", serveHome)
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		serveWs(hub, w, r)
-	})
-	logger.Info("starting server", "addr", *addr)
-
-	err = http.ListenAndServe(*addr, nil)
-	logger.Error(err.Error())
-
+	
+	
+	 templateCache, err := newTemplateCache()
+     if err != nil {
+         logger.Error(err.Error())
+         os.Exit(1)
+     }
+	
 	sessionManager := scs.New()
 	sessionManager.Store = sqlite3store.New(db)
 	sessionManager.Lifetime = 12 * time.Hour
+	
+	formDecoder := form.NewDecoder()
+	app := &application{
+		logger:  logger,
+		templateCache:  templateCache,
+		sessionManager:  sessionManager,
+		hub: hub,
+		formDecoder: formDecoder,
+		users: &models.UserModel{DB: db},
+	}
+		
+	logger.Info("starting server", "addr", *addr)
+
+	err = http.ListenAndServe(*addr, app.routes())
+	logger.Error(err.Error())
+
 }
 func runMigrations(db *sql.DB) error {
 	goose.SetBaseFS(database.MigrationsFS)
@@ -80,17 +93,6 @@ func openDB(dsn string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
-	// schema, err := os.ReadFile("internal/database/chat.sql")
-	// if err != nil {
-	// 	db.Close()
-	//  	return nil, err
-	//  }
-	//  _, err = db.Exec(string(schema))
-	//  if err != nil {
-	// 	db.Close()
-	// 	return nil, err
-	//  }
-
 	return db, nil
 
 }

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body class="main-body">
+    <form action='/user/login' method='POST' novalidate>
+        <div class="auth">
+            <h3>Login</h3>
+    {{range .Form.NonFieldErrors}}
+        <div class='error'>{{.}}</div>
+    {{end}}
+    <div>
+        <label>Username:</label>
+        {{with .Form.FieldErrors.name}}
+            <label class='error'>{{.}}</label>
+        {{end}}
+        <input type='name' name='name' value='{{.Form.Name}}'>
+    </div>
+    <div>
+        <label>Password:</label>
+        {{with .Form.FieldErrors.password}}
+            <label class='error'>{{.}}</label>
+        {{end}}
+        <input type='password' name='password'>
+    </div>
+    <div>
+        <input type='submit' value='Login'>
+    </div>
+        </div>
+</form>
+</body>
+</html>

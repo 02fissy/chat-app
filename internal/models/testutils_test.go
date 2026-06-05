@@ -170,7 +170,6 @@ func TestUserAuthenticate(t *testing.T) {
 
             userID, err := model.Authenticate(
                 tt.username,
-                tt.phone,
                 tt.password,
             )
 

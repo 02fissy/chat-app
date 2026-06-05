@@ -23,7 +23,12 @@ type Attachment struct {
 type UserModel struct {
 	DB *sql.DB
 }
- func(m *UserModel) Insert(name, phone_no, password_hash string) error{
+type UserModelInterface interface {
+    Insert(name, phone_no, password_hash string) error
+    Authenticate(name, password_hash string) (int64, error)
+    Exists(id int) (bool, error)
+}
+func(m *UserModel) Insert(name, phone_no, password_hash string) error{
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password_hash), 12)
 	if err != nil {
 		return err
@@ -42,11 +47,11 @@ type UserModel struct {
 	}
 	return nil
  }
- func(m *UserModel) Authenticate(name, phone_no, password_hash string) (int64, error) {
+ func(m *UserModel) Authenticate(name,  password_hash string) (int64, error) {
 	var id int64
 	var passwordHash []byte
-	stmt := `SELECT user_id, password_hash FROM users WHERE username = ? AND phone_number = ?`
-	err := m.DB.QueryRow(stmt, name, phone_no).Scan(&id, &passwordHash)
+	stmt := `SELECT user_id, password_hash FROM users WHERE username = ?`
+	err := m.DB.QueryRow(stmt, name).Scan(&id, &passwordHash)
 	if err != nil{
 		if errors.Is(err, sql.ErrNoRows) {
             return 0, ErrInvalidCredentials
